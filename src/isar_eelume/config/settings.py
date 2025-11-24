@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     def __init__(self) -> None:
         try:
-            source = files("isar_robot").joinpath("config").joinpath("settings.env")
+            source = files("isar_eelume").joinpath("config").joinpath("settings.env")
             with as_file(source) as eml:
                 env_file = eml
         except ModuleNotFoundError:

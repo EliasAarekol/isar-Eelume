@@ -31,7 +31,7 @@ from robot_interface.models.mission.task import (
     TakeVideo,
 )
 
-from isar_robot.telemetry import Telemetry
+from isar_eelume.telemetry import Telemetry
 
 example_images: Path = Path(
     os.path.dirname(os.path.realpath(__file__)), "example_data/example_images"
@@ -47,7 +47,7 @@ example_audio: Path = Path(
     os.path.dirname(os.path.realpath(__file__)), "example_data/example_audio"
 )
 
-logger: Logger = logging.getLogger("isar_robot")
+logger: Logger = logging.getLogger("isar_eelume")
 
 
 def create_image(

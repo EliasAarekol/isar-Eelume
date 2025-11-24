@@ -1,6 +1,6 @@
 *
 !.git/
-!src/isar_robot
+!src/isar_eelume
 !pyproject.toml
 !requirements.txt
 !LICENSE

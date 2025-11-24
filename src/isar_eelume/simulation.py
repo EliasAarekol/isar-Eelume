@@ -12,7 +12,7 @@ from robot_interface.models.mission.mission import Mission
 from robot_interface.models.mission.status import MissionStatus, TaskStatus
 from robot_interface.models.mission.task import ReturnToHome
 
-from isar_robot.config.settings import settings
+from isar_eelume.config.settings import settings
 
 
 class MissionSimulation(Thread):
@@ -21,7 +21,7 @@ class MissionSimulation(Thread):
         mission: Mission,
     ):
         time.sleep(settings.MISSION_SIMULATION_TIME_TO_START)
-        self.logger = logging.getLogger("isar robot mission simulation")
+        self.logger = logging.getLogger("isar Eelume mission simulation")
         self.mission: Mission = mission
         self.task_index: int = 0
         self.n_tasks: int = len(mission.tasks)

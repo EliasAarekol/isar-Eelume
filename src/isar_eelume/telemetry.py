@@ -13,7 +13,7 @@ from robot_interface.telemetry.payloads import (
 )
 from robot_interface.utilities.json_service import EnhancedJSONEncoder
 
-from isar_robot.config.settings import settings
+from isar_eelume.config.settings import settings
 
 
 def _get_pressure_level() -> float:
