@@ -1,7 +1,7 @@
 from alitra import Frame, Position
 from robot_interface.models.mission.task import RecordAudio, TakeImage, TakeThermalVideo
 
-from isar_robot import inspections, telemetry
+from isar_eelume import inspections, telemetry
 
 target = Position(x=0, y=0, z=0, frame=Frame("robot"))
 telemetryModule = telemetry.Telemetry()

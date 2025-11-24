@@ -1,4 +1,4 @@
-from isar_robot.telemetry import Telemetry, _get_pressure_level
+from isar_eelume.telemetry import Telemetry, _get_pressure_level
 
 
 def test_get_battery_level() -> None:
