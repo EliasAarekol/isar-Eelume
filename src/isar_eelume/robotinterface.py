@@ -4,6 +4,8 @@ from logging import Logger
 from queue import Queue
 import random
 from threading import Thread
+from concurrent import futures
+import concurrent.futures
 import time
 from typing import Callable, List, Optional
 from alitra import Position
@@ -11,6 +13,12 @@ from alitra import Position
 from robot_interface.models.exceptions.robot_exceptions import (
     RobotCommunicationException,
     RobotNoMissionRunningException,
+    RobotAlreadyHomeException,
+    RobotInfeasibleMissionException,
+    RobotException,
+    RobotMissionStatusException,
+    RobotActionException,
+    RobotRetrieveInspectionException,
 )
 from robot_interface.models.inspection.inspection import Inspection
 from robot_interface.models.mission.mission import Mission
@@ -23,6 +31,7 @@ from robot_interface.models.mission.task import (
     TakeThermalImage,
     TakeThermalVideo,
     TakeVideo,
+    TaskTypes,
 )
 from robot_interface.models.robots.media import MediaConfig
 from robot_interface.robot_interface import RobotInterface
@@ -30,80 +39,93 @@ from robot_interface.telemetry.mqtt_client import MqttTelemetryPublisher
 
 from isar_eelume import inspections, telemetry
 from isar_eelume.config.settings import settings
-from isar_eelume.simulation import MissionSimulation
+from isar_eelume.eelink_sim import EeLinkSim
 
 
 class Robot(RobotInterface):
     def __init__(self) -> None:
-        self.telemetry = telemetry.Telemetry()
-        self.logger: Logger = logging.getLogger("isar_eelume")
-        self.last_task_completion_time: datetime = datetime.now(timezone.utc)
-        self.robot_is_home: bool = False
-        self.mission_simulation: Optional[MissionSimulation] = None
+        self.Ee_client = EeLinkSim()
+        self.logger = logging.getLogger("ISAR - Eelume")
+        self.logger.info("hello from ISAR")
+
+    def mission_feasible(self, mission: Mission) -> bool:
+        self.logger.info("Mission_feasible called")
+        return True
 
     def initiate_mission(self, mission: Mission) -> None:
-        # print("initiated!")
-        if (
-            self.mission_simulation
-            and self.mission_simulation.is_alive()
-            and not self.mission_simulation.mission_done
-        ):
-            raise RobotCommunicationException(
-                error_description="Could not start mission as one is already running"
+        self.logger.info("Initatiate mission called")
+
+        if self.Ee_client.is_home() and mission.tasks[0] == TaskTypes.ReturnToHome:
+            raise RobotAlreadyHomeException(
+                "Can not start mission by returning home, robot is already home."
             )
-        elif self.mission_simulation:
-            self.mission_simulation.join()
-        self.mission_simulation = MissionSimulation(mission)
-        self.mission_simulation.start()
-        self.robot_is_home = False
+        if not self.mission_feasible(mission):
+            raise RobotInfeasibleMissionException(
+                "Can not start mission, mission is infeasible."
+            )
 
-    def task_status(self, task_id: str) -> TaskStatus:
-        print("statusstaus")
-        # if not self.mission_simulation:
-        #     raise RobotCommunicationException(
-        #         error_description="Could not get task status as no mission is running"
-        #     )
+        if self.Ee_client.running():
+            raise RobotException(
+                "Can not start new mission, mission is already running"
+            )
 
-        # status = self.mission_simulation.task_status(task_id)
-        # if status == TaskStatus.Successful and self.mission_simulation.is_return_home:
-        #     self.robot_is_home = True
+        self.Ee_client.initiate_mission(mission)
+
+    # add error handling based on how the function throws execptions
+    def mission_status(self, mission_id):
+        # self.logger.info(
+        #     f"Mission status is {self.Ee_client.mission_status(mission_id)}"
+        # )
+        return self.Ee_client.mission_status(mission_id)
+
+        # TIMEOUT_TIME = 1 # second
+        # with futures.ThreadPoolExecutor() as executor:
+        #     future = executor.submit(self.sim.mission_status(mission_id))
+        #     try:
+        #         status = future.result(timeout=TIMEOUT_TIME)
+        #     except TimeoutError:
+        #         raise RobotCommunicationException
+        #     except:
+        #         raise RobotMissionStatusException
+        # if status is None:
+        #     raise RobotException
         # return status
 
-    def mission_status(self, mission_id):
-        # return self.mission_simulation.mission_status()
-        print("statusstaus")
-        
-    def stop(self) -> None:
-        # if not self.mission_simulation:
-        #     raise RobotNoMissionRunningException(
-        #         error_description="Attempted to stop non-existent mission"
+        # status_call = Thread(
+        #     target= self.sim.mission_status(mission_id)
         #     )
-        # try:
-        #     self.mission_simulation.stop_mission()
-        # except RobotNoMissionRunningException as e:
-        #     raise e
-        # finally:
-        #     self.mission_simulation = None
-        print("stopping!")
+        # status_call.start()
+        # status_call.join(timeout=TIMEOUT_TIME)
 
+        # if th
+
+    # Error handling here
+    def stop(self) -> None:
+        self.logger.info("stop called")
+
+        robot_status = self.Ee_client.robot_status()
+        if not robot_status == RobotStatus.Busy:
+            raise RobotNoMissionRunningException(
+                "Could not stop mission - No mission running"
+            )
+        self.Ee_client.stop()
+
+    # might actually change this into actually extracting the inspection type and using the api to get it
     def get_inspection(self, task: InspectionTask) -> Inspection:
-        # if type(task) in [TakeImage, TakeThermalImage]:
-        #     return inspections.create_image(task, self.telemetry)
-        # elif type(task) is TakeVideo:
-        #     return inspections.create_video(task, self.telemetry)
-        # elif type(task) is TakeThermalVideo:
-        #     return inspections.create_thermal_video(task, self.telemetry)
-        # elif type(task) is TakeCO2Measurement:
-        #     return inspections.create_co2_measurement(task, self.telemetry)
-        # elif type(task) is RecordAudio:
-        #     return inspections.create_audio(task, self.telemetry)
-        # else:
-        #     return None
-        pass
+        self.logger.info("get_inspection called")
+
+        try:
+            inspection = self.Ee_client.get_inspection(task)
+        except Exception as e:
+            raise RobotRetrieveInspectionException(
+                "Could not retrieve task, API call failed with message " + e
+            )
+        return inspection
 
     def register_inspection_callback(
         self, callback_function: Callable[[Inspection, Mission], None]
     ) -> Optional[Thread]:
+        self.logger.info("Register inspection callback called")
 
         if settings.SHOULD_SIMULATE_INSPECTION_CALLBACK_CRASH:
             return None
@@ -124,125 +146,59 @@ class Robot(RobotInterface):
         return thread
 
     def initialize(self) -> None:
+        self.logger.info("Initialized called")
+
         return
 
-    def _get_pose_telemetry(self, isar_id: str, robot_name: str) -> str:
-        # current_target: Optional[Position] = None
-        # if self.mission_simulation:
-        #     current_task = self.mission_simulation.current_task()
-        #     if current_task and isinstance(current_task, InspectionTask):
-        #         current_target = current_task.robot_pose.position
+    def task_status(self, task_id: str) -> TaskStatus:
+        # self.logger.info("Task status called")
+        return self.Ee_client.task_status(task_id)
 
-        # return self.telemetry.get_pose_telemetry(
-        #     isar_id=isar_id, robot_name=robot_name, current_target=current_target
-        # )
-        pass
+    # def _get_pose_telemetry(self, isar_id: str, robot_name: str) -> str:
 
-    def _get_battery_telemetry(self, isar_id: str, robot_name: str) -> str:
-        # return self.telemetry.get_battery_telemetry(
-        #     isar_id=isar_id, robot_name=robot_name, is_home=self.robot_is_home
-        # )
-        pass
+    # def _get_battery_telemetry(self, isar_id: str, robot_name: str) -> str:
 
     def get_telemetry_publishers(
         self, queue: Queue, isar_id: str, robot_name: str
     ) -> List[Thread]:
-        # publisher_threads: List[Thread] = []
+        raise NotImplementedError()
 
-        # pose_publisher: MqttTelemetryPublisher = MqttTelemetryPublisher(
-        #     mqtt_queue=queue,
-        #     telemetry_method=self._get_pose_telemetry,
-        #     topic=f"isar/{isar_id}/pose",
-        #     interval=settings.ROBOT_POSE_PUBLISH_INTERVAL,
-        #     retain=False,
-        # )
-        # pose_thread: Thread = Thread(
-        #     target=pose_publisher.run,
-        #     args=[isar_id, robot_name],
-        #     name="ISAR Robot Pose Publisher",
-        #     daemon=True,
-        # )
-        # publisher_threads.append(pose_thread)
-
-        # battery_publisher: MqttTelemetryPublisher = MqttTelemetryPublisher(
-        #     mqtt_queue=queue,
-        #     telemetry_method=self._get_battery_telemetry,
-        #     topic=f"isar/{isar_id}/battery",
-        #     interval=settings.ROBOT_BATTERY_PUBLISH_INTERVAL,
-        #     retain=False,
-        # )
-        # battery_thread: Thread = Thread(
-        #     target=battery_publisher.run,
-        #     args=[isar_id, robot_name],
-        #     name="ISAR Robot Battery Publisher",
-        #     daemon=True,
-        # )
-        # publisher_threads.append(battery_thread)
-
-        # obstacle_status_publisher: MqttTelemetryPublisher = MqttTelemetryPublisher(
-        #     mqtt_queue=queue,
-        #     telemetry_method=self.telemetry.get_obstacle_status_telemetry,
-        #     topic=f"isar/{isar_id}/obstacle_status",
-        #     interval=settings.ROBOT_OBSTACLE_STATUS_PUBLISH_INTERVAL,
-        #     retain=False,
-        # )
-        # obstacle_status_thread: Thread = Thread(
-        #     target=obstacle_status_publisher.run,
-        #     args=[isar_id, robot_name],
-        #     name="ISAR Robot Obstacle Status Publisher",
-        #     daemon=True,
-        # )
-        # publisher_threads.append(obstacle_status_thread)
-
-        # pressure_publisher: MqttTelemetryPublisher = MqttTelemetryPublisher(
-        #     mqtt_queue=queue,
-        #     telemetry_method=self.telemetry.get_pressure_telemetry,
-        #     topic=f"isar/{isar_id}/pressure",
-        #     interval=settings.ROBOT_PRESSURE_PUBLISH_INTERVAL,
-        #     retain=False,
-        # )
-        # pressure_thread: Thread = Thread(
-        #     target=pressure_publisher.run,
-        #     args=[isar_id, robot_name],
-        #     name="ISAR Robot Pressure Publisher",
-        #     daemon=True,
-        # )
-        # publisher_threads.append(pressure_thread)
-
-        # return publisher_threads
-        pass
-
+    # Expand error handling
     def robot_status(self) -> RobotStatus:
-        # if self.mission_simulation and not self.mission_simulation.mission_done:
-        #     mission_status: MissionStatus = self.mission_simulation.mission_status()
-        #     if mission_status == MissionStatus.Paused:
-        #         return RobotStatus.Paused
-        #     elif mission_status in [MissionStatus.InProgress, MissionStatus.NotStarted]:
-        #         return RobotStatus.Busy
-        # if self.robot_is_home:
-        #     return RobotStatus.Home
-        # return RobotStatus.Available
-        return RobotStatus.Available
+        # self.logger.info("Robot status called")
 
+        return self.Ee_client.robot_status()
+
+    # Expand error handling might just say that this isnt a possible function
     def pause(self) -> None:
-        # if not self.mission_simulation:
-        #     raise RobotNoMissionRunningException(
-        #         error_description="Attempted to pause non-existent mission"
-        #     )
-        # self.mission_simulation.pause_mission()
-        print("Pausing!")
+        self.logger.info("Pause called")
 
+        robot_status = self.Ee_client.robot_status()
+        if robot_status == RobotStatus.Paused:
+            raise RobotException("Could not pause mission - Mission already paused")
+        if not robot_status == RobotStatus.Busy:
+            raise RobotNoMissionRunningException(
+                "Could not pause mission - No mission running"
+            )
+        self.Ee_client.pause_mission()
+
+    # Expand error handling
     def resume(self) -> None:
-        # if not self.mission_simulation:
-        #     raise RobotNoMissionRunningException(
-        #         error_description="Attempted to resume non-existent mission"
-        #     )
-        # self.mission_simulation.resume_mission()
-        print("Resuming!")
+        self.logger.info("REsume called")
+
+        robot_status = self.Ee_client.robot_status()
+        if not robot_status == RobotStatus.Paused:
+            raise RobotException(
+                "Could not resume mission - no currently paused mission"
+            )
+        self.Ee_client.resume()
 
     def generate_media_config(self) -> Optional[MediaConfig]:
-        return None
+        raise NotImplementedError()
 
+    # Expand error handling
+    # This tries to put the robot/state_machine into a charging state, but thats probably not very relevant for Eelume. ISAR wont nesc be able to tell the Eelume to goto charge
     def get_battery_level(self):
-        # return self.telemetry.current_battery_level
-        return 100
+        # self.logger.info("get_batter_level called")
+
+        return self.Ee_client.battery_level()
